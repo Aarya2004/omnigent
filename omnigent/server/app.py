@@ -154,6 +154,11 @@ _WEB_UI_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 _WEB_UI_STATIC_CACHE_CONTROL = "public, max-age=3600"
 _WEB_UI_API_FALLBACK_PREFIXES = frozenset({"api", "auth", "health", "v1"})
 _WEB_UI_GZIP_MINIMUM_SIZE = 1024
+# 503 codes for a runner that is offline or cannot serve the request —
+# expected during host reboots/idle-reaps, so logged below ERROR.
+_TRANSIENT_RUNNER_ERROR_CODES = frozenset(
+    {ErrorCode.RUNNER_UNAVAILABLE, ErrorCode.RUNNER_CAPABILITY_MISMATCH}
+)
 _CLAUDE_NATIVE_AGENT_NAME = CLAUDE_NATIVE_CODING_AGENT.agent_name
 _CODEX_NATIVE_AGENT_NAME = CODEX_NATIVE_CODING_AGENT.agent_name
 _PI_NATIVE_AGENT_NAME = PI_NATIVE_CODING_AGENT.agent_name
@@ -1617,7 +1622,12 @@ def create_app(
         :param exc: The application error.
         :returns: A JSON response with the error code and message.
         """
-        if exc.http_status >= 500:
+        if exc.code in _TRANSIENT_RUNNER_ERROR_CODES:
+            # An offline/mismatched runner is a normal operational state
+            # (host reboot, idle-reap, tunnel drop), not an internal
+            # error — keep it visible without a traceback per hit.
+            _logger.warning("Runner unavailable: %s", exc.message)
+        elif exc.http_status >= 500:
             _logger.error("Internal error: %s", exc.message, exc_info=True)
         elif exc.http_status == 400 and request.url.path.endswith("/policies/evaluate"):
             _logger.warning(
