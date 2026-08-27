@@ -325,9 +325,11 @@ review comment on that PR, so the author knows), then **switch to the author pat
 (Step 2B) and open your own PR** that resolves the bug correctly. In your PR,
 reference the existing one and summarize why a fresh approach was warranted.
 Record `mode: "authored_fix"` and put the reviewed PR's number in your prose so
-the two are linked. **Then close the superseded PR** (same reason as the fork
-take-over: two open PRs on one issue trip the duplicate-PR automation, which
-auto-closes the newer one — yours): `gh pr comment <old> --body 'Superseded by
+the two are linked. **Close the superseded PR the instant yours is open — before
+you emit the interim handoff (Step 3.5) and before you start Step 4** (same reason
+as the fork take-over: two open PRs on one issue trip the duplicate-PR automation,
+which auto-closes the newer one — yours, and a cleanup left for the end of Step 4
+is what a mid-turn SSE drop strands): `gh pr comment <old> --body 'Superseded by
 #<yours> — a different approach was needed; see there.'` then `gh pr close <old>`.
 Closing a PR is a base-repo operation (it flips `state` on the PR object in
 `omnigent-ai/omnigent`), so `pull_requests: write` covers it **even for a
@@ -623,6 +625,17 @@ Once the set is genuinely green:
    not-yet-known Step-4 fields empty (`ci_status`, `polly_review`,
    `maintainer_review`) — you refill them in the final handoff. Emit it as a
    normal intermediate message (json block last in *that* message), then carry on.
+   **Before this handoff, do the two outward actions a mid-turn drop would
+   otherwise strand:**
+   - **Label your PR `ui-preview`** (author path) — `gh pr edit <pr> --add-label
+     ui-preview`. Your own PR is same-repo, already-pipelined code, so it needs no
+     CI-green gate (see 4.1); label it now so the preview builds while you drive
+     Step 4. (Review-path fork PRs still wait for green — 4.1.)
+   - **If you opened this PR to supersede another** (fork take-over, or the
+     "approach is wrong" escape hatch), you already commented on and closed that PR
+     *before* this handoff — see Step 4's fork-take-over and Step 2A's escape hatch.
+     Set `reviewed_pr_url` to the superseded PR here so the workflow can verify it's
+     closed as a backstop.
 6. You do **not** merge. Opening the PR is not the finish line — go to Step 4 and
    drive it to a green, reviewed, ready-for-a-human state.
 
@@ -663,22 +676,27 @@ can land a fix depends on where its branch lives:
       read from `gh pr view <pr> --json commits`).
     - In your PR body, link the fork PR (`Builds on #<pr> by @<author>`) and say
       why you re-opened it (couldn't push to the fork).
-    - **Close the fork PR so it doesn't collide with yours.** Two open PRs that fix
-      the same issue trip the repo's duplicate-PR automation, which will auto-close
-      the **newer** one — i.e. *yours*. Once your PR is open, comment on the fork PR
-      pointing to yours and close it:
+    - **Close the fork PR the instant yours is open — before anything else.**
+      Two open PRs that fix the same issue trip the repo's duplicate-PR automation,
+      which will auto-close the **newer** one — i.e. *yours*. So the moment
+      `gh pr create` returns your PR number, comment on the fork PR pointing to
+      yours and close it **as the very next commands — before you emit the interim
+      handoff (Step 3.5) and before you start driving Step 4**:
       ```
       gh pr comment <fork-pr> --body 'Superseded by #<your-pr> — I took this over to add a fix I could not push to your fork (App tokens can’t push to forks). Your commits are carried over with credit. Thanks @<author>!'
       gh pr close <fork-pr>
       ```
-      This both keeps the contributor informed and stops the dedup bot from closing
-      your PR as the duplicate. Closing a PR is a base-repo operation (it flips
-      `state` on the PR object in `omnigent-ai/omnigent`), so `pull_requests: write`
-      covers it **even though the head branch is on a fork** — the fork-push
-      restriction does not apply to a close. Expect it to succeed; run it. Only if
-      the close returns a real error, **record that error in `maintainer_review`**
-      and ask the maintainer to close `#<fork-pr>` in favor of yours — never leave
-      both silently open.
+      Do **not** defer this to the end of Step 4: the session can drop mid-turn
+      (the `--server` SSE stream ends the Run step abruptly), and a cleanup left for
+      last is exactly what gets lost — stranding two open PRs. Close first, then
+      hand off. This both keeps the contributor informed and stops the dedup bot
+      from closing your PR as the duplicate. Closing a PR is a base-repo operation
+      (it flips `state` on the PR object in `omnigent-ai/omnigent`), so
+      `pull_requests: write` covers it **even though the head branch is on a fork**
+      — the fork-push restriction does not apply to a close. Expect it to succeed;
+      run it. Only if the close returns a real error, **record that error in
+      `maintainer_review`** and ask the maintainer to close `#<fork-pr>` in favor of
+      yours — never leave both silently open.
     - Set `mode: "authored_fix"`, record the fork PR's number in `reviewed_pr_url`,
       and drive **your** PR through the rest of Step 4 (you can push to it).
   - **If the fork PR needs no fix** (repro passes against it, CI green, review
@@ -712,30 +730,35 @@ fix can get a deployed app a reviewer connects a runner to and validates directl
 (see the live-validation prompt in 4.4), which is the point of standing the
 preview up.
 
-**Label only after the code is safe to deploy — never up front.**
-The `ui-preview` label is a trust signal: it triggers a `pull_request_target`
-build+deploy of the PR's code to a Databricks workspace, so applying it vouches
-that *this* code is safe to run there. Do **not** label at the start of Step 4 to
-"let the deploy build while CI runs." Apply the label once, on the current head
-commit, only **after** both gates below are green for that commit:
-  - the reproduction test and full CI pass (4.2), and
-  - the Polly review is clean — no unresolved blocking or security findings (4.3).
+**When you label depends on *whose* code you're deploying.** The `ui-preview`
+label is a trust signal: it triggers a `pull_request_target` build+deploy of the
+PR's code to a Databricks workspace, so applying it vouches that *this* code is
+safe to run there. That trust boundary is about **fork code**, not about CI being
+green — so the two paths label at different times:
 
-How much this matters depends on **whose** PR you're landing:
-  - **A PR you authored** is a branch on `omnigent-ai/omnigent` itself — a
-    same-repo PR no outside contributor can push to, carrying code that already
-    came through your repro→fix→CI→Polly pipeline. Labeling it is low-risk;
-    waiting for green is just good hygiene (don't stand up a preview of a red PR).
-  - **A PR you're reviewing** may be a **fork** PR from an outside contributor.
-    Here the label is the real trust boundary: it green-lights deploying fork
-    code, so never apply it until the current head has passed CI and a clean
-    Polly review. And because an attacker can push a new commit *after* you label,
-    the fork deploy is backstopped by a human-approved Environment that re-gates
-    every commit — but that gate is a safety net, not a licence to label early.
+  - **A PR you authored (author path)** is a branch on `omnigent-ai/omnigent`
+    itself — a same-repo PR no outside contributor can push to, carrying code that
+    already came through your repro→fix→CI→Polly pipeline. There is no untrusted
+    code to gate, so **label it immediately, the moment `gh pr create` returns** —
+    right alongside opening the PR, *before* the interim handoff and Step 4's CI
+    poll. Front-loading it matters: the deploy takes a few minutes and the session
+    can drop mid-Step-4 (the `--server` SSE stream ends the Run step abruptly), so
+    a label deferred to "after CI goes green" is exactly what a crash strands.
+    Labeling early just means the preview builds while CI runs — for your own
+    already-pipelined code that's fine, not a risk.
+  - **A PR you're reviewing (review path)** may be a **fork** PR from an outside
+    contributor. Here the label *is* the real trust boundary: it green-lights
+    deploying fork code, so never apply it until the current head has passed CI and
+    a clean Polly review (4.2 + 4.3). And because an attacker can push a new commit
+    *after* you label, the fork deploy is backstopped by a human-approved
+    Environment that re-gates every commit — but that gate is a safety net, not a
+    licence to label early.
 
-Whichever path, if you push (or the author pushes) a further commit after
-labelling, re-confirm CI + Polly on the new head before you rely on the preview.
-Never label a PR whose approach you're unsure of or whose review is still red.
+If you push (or the author pushes) a further commit after labelling, re-confirm
+CI + Polly on the new head before you rely on the preview. Never keep a preview
+you're relying on for a PR whose review is still red — on the author path, if CI
+later goes red, say so in the handoff rather than pointing a reviewer at a broken
+preview.
 
 The workflow deploys for **any labelled PR that isn't a draft — including fork
 PRs**; there is no author-membership gate. The label itself *is* the trust
@@ -1000,6 +1023,22 @@ is clean (4.3), you're done iterating — now record your verdict and hand off t
 human. A `CONFLICTING`/`DIRTY` branch is **not** `fixed`: rebase and resolve
 (4.2) before you submit a verdict, or, if you truly can't, downgrade the outcome
 and say the PR needs a conflict resolution the maintainer must do.
+
+**Gate: the after-fix clip is present, or its absence is named — no silent skip.**
+Before you tag anyone, confirm the deliverable carries the before/after proof
+(2B.5 / 2A.3): the PR's **Demo** section shows the `after` clip (and the `before`
+when one was recovered), and `recordings` in your handoff lists an `after` entry
+for **every** `web`/`mobile`/`terminal`/`cli`/`desktop` facet. You **added the
+reproduction test** — that is the driver the recorder needs, so on a web/mobile
+fix the after-clip is obtainable here; produce it (build the SPA, record via
+`OMNIGENT_E2E_RECORD_DIR` per `dev/recording-lanes.md`) rather than linking only
+the repro run and a manual "run it yourself" command. Omit the after-clip **only**
+for a genuine, named environmental blocker (recorder tooling missing, fixture
+won't come online after the SPA build, `api`-surface facet with nothing to film) —
+and when you omit it, **say which blocker, with the evidence**, in both the PR's
+Demo section and the handoff (a `recordings` prose note, or `maintainer_review`).
+A missing upstream before-clip is never that blocker. Never report an after-clip
+you didn't actually produce, and never drop it silently.
 
 **First, submit your final review** per the verdict rule in 2A.5 (review path
 only): **approve** when you were a pure reviewer and the PR is `fixed` (you pushed
