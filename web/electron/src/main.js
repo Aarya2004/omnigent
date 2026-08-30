@@ -41,6 +41,7 @@ const {
   normalizeUrl,
   normalizeRecentServers,
   expandDatabricksWorkspaceUrl,
+  normalizeSavedServerUrl,
   fetchServerManifest,
   PRE_MANIFEST_BASELINE,
 } = require("./url");
@@ -1218,7 +1219,8 @@ function createWindow(targetUrl, opts = {}) {
   });
   const explicit =
     typeof targetUrl === "string" && /^https?:\/\//i.test(targetUrl) ? targetUrl : undefined;
-  const saved = loadSettings().server_url;
+  // CLI config stores the API mount; Electron boots the browser-facing SPA.
+  const saved = normalizeSavedServerUrl(loadSettings().server_url);
   // serverUrl: the window's server IDENTITY for host/server CLI commands
   // (``omnigent host --server``, ``omnigent login``, ``serverAuthed``) — the
   // origin or origin+mount, WITHOUT the conversation path. Prefer an explicit
