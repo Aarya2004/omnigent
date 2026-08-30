@@ -57,6 +57,12 @@ const { isDeveloperModeEnabled } = require("./developer_mode");
 const { excludingManagedServers, getManagedServerUrls } = require("./managed_preferences");
 const { registerSessionExpiryReload } = require("./session-expiry");
 const { decideWindowOpen, stripCrossOriginOpenerHeaders, WEB_SCHEMES } = require("./popupPolicy");
+const {
+  SETTINGS_PATH,
+  focusedConnectedWindow,
+  macApplicationMenu,
+  settingsMenuItem,
+} = require("./settingsNavigation");
 const omnigentCli = require("./omnigent_cli");
 const serverManager = require("./server_manager");
 
@@ -1921,18 +1927,23 @@ function changeServer() {
 
 function buildMenu() {
   const isMac = process.platform === "darwin";
+  const settingsItem = settingsMenuItem(() => {
+    const target = focusedConnectedWindow(BrowserWindow.getFocusedWindow(), windows);
+    sendOpenPath(target, SETTINGS_PATH);
+  });
 
   /** @type {Electron.MenuItemConstructorOptions[]} */
   const template = [];
 
-  // macOS app menu (About/Services/Hide/Quit), named "Omnigent" via the
-  // app name set below. Non-mac platforms have no app menu.
+  // Settings belongs in the macOS app menu. Keep the standard app roles that
+  // Electron's composite appMenu role would otherwise provide.
   if (isMac) {
-    template.push({ role: "appMenu" });
+    template.push(macApplicationMenu(app.name, settingsItem));
   }
 
   /** @type {Electron.MenuItemConstructorOptions[]} */
   const serverSubmenu = [
+    ...(!isMac ? [settingsItem, { type: "separator" }] : []),
     {
       id: "new_session",
       label: "New Session",
@@ -2800,20 +2811,17 @@ function focusAndRestore(win) {
 }
 
 /**
- * Tell a pinned window's SPA to navigate in-place to an in-app path
- * (`/c/<id>`), without a reload — reuses the SPA's router, the same path a
- * notification click routes (basename-less; the embedded build's
- * `basenamedRouting` rebases it under the mount). Main→renderer only; the page
- * cannot invoke it. The caller (reuse-inplace) only sends when the window's
- * top-level page IS the pinned server (SPA listener mounted); this is
- * defense-in-depth on top of that.
+ * Tell a pinned window's SPA to navigate in-place to a basename-less app path
+ * (`/c/<id>`, `/settings`), without a reload. The embedded build's
+ * `basenamedRouting` rebases it under the mount. Main→renderer only; the page
+ * cannot invoke it. Callers send only while the pinned app is visible.
  *
  * @param {BrowserWindow | null | undefined} win
  * @param {string} routePath
  */
 function sendOpenPath(win, routePath) {
   if (!win || win.isDestroyed()) return;
-  console.log(`[omnigent] deep-link: send open-path ${routePath}`);
+  console.log(`[omnigent] send open-path ${routePath}`);
   try {
     win.webContents.send("omnigent:open-path", routePath);
   } catch {
