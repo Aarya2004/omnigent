@@ -990,21 +990,32 @@ async def probe_codex_model_options(*, codex_path: str | None = None) -> list[_J
     return mark_launch_default(rows, pinned_model)
 
 
-def codex_catalog_fingerprint(launch: NativeCodexLaunch) -> str:
-    """The launch-config fingerprint keying codex's shared model catalog.
+def codex_catalog_fingerprint(launch: NativeCodexLaunch, *, codex_path: str | None = None) -> str:
+    """The launch fingerprint keying codex's shared model catalog.
 
     One formula for every consumer (host boot probe, runner launch, live
     write-back), so they read and write the same catalog file. Callers
     fingerprint the SHAPE — a ``model=None`` resolution — so per-session
     picks never fragment the catalog.
 
+    The Codex executable is part of the key. The catalog holds that
+    binary's own answer, so an upgraded CLI must re-probe instead of
+    serving model names the previous release printed. The binary is
+    resolved the same way the probe launches it.
+
     :param launch: The resolved launch (``resolve_native_codex_launch``).
+    :param codex_path: Optional Codex executable override, matching the
+        one the caller's probe would launch.
     :returns: A stable fingerprint string.
     """
-    from omnigent.model_catalog_store import fingerprint_of
+    from omnigent.model_catalog_store import binary_identity, fingerprint_of
 
     return fingerprint_of(
-        "codex-native", launch.profile, launch.model, tuple(launch.config_overrides)
+        "codex-native",
+        launch.profile,
+        launch.model,
+        tuple(launch.config_overrides),
+        binary_identity(codex_path or _find_codex_cli()),
     )
 
 
@@ -1026,7 +1037,7 @@ async def codex_launch_catalog(*, codex_path: str | None = None) -> list[_JsonOb
     except Exception:  # noqa: BLE001 — a broken provider config means no catalog
         _logger.warning("codex catalog: launch shape resolution failed", exc_info=True)
         return None
-    fingerprint = codex_catalog_fingerprint(launch)
+    fingerprint = codex_catalog_fingerprint(launch, codex_path=codex_path)
 
     async def _probe() -> list[_JsonObject] | None:
         try:
@@ -1040,10 +1051,12 @@ async def codex_launch_catalog(*, codex_path: str | None = None) -> list[_JsonOb
     return await model_catalog_store.ensure_catalog("codex-native", fingerprint, _probe)
 
 
-async def codex_launch_catalog_is_stale() -> bool:
+async def codex_launch_catalog_is_stale(*, codex_path: str | None = None) -> bool:
     """
     Whether the default launch shape's stored catalog is past the TTL.
 
+    :param codex_path: Optional Codex executable override, matching the
+        one :func:`codex_launch_catalog` would probe with.
     :returns: ``True`` when the store holds only a stale entry; ``False``
         when it is fresh, absent, or the launch shape cannot resolve.
     """
@@ -1053,7 +1066,9 @@ async def codex_launch_catalog_is_stale() -> bool:
         launch = await asyncio.to_thread(resolve_native_codex_launch, model=None)
     except Exception:  # noqa: BLE001 — a broken provider config means no catalog
         return False
-    return model_catalog_store.catalog_is_stale("codex-native", codex_catalog_fingerprint(launch))
+    return model_catalog_store.catalog_is_stale(
+        "codex-native", codex_catalog_fingerprint(launch, codex_path=codex_path)
+    )
 
 
 def _build_native_codex_app_server_argv(
