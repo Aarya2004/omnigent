@@ -1928,7 +1928,9 @@ class _SessionsChatReplAdapter:
                     flush=True,
                 )
 
-    async def _reconcile_runner_after_bind_failure(self, exc: OmnigentError) -> Session | None:
+    async def _reconcile_runner_after_bind_failure(
+        self, exc: OmnigentError
+    ) -> _SessionSnapshot | None:
         """
         Adopt the server's live runner after a stale-runner bind failure.
 
