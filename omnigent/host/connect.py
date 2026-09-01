@@ -1527,7 +1527,12 @@ class HostProcess:
         # first turn dies confusingly inside the executor. ``None`` (an
         # older server, or a session with no resolvable harness) skips the
         # check so version skew fails open.
-        if frame.harness is not None and not harness_is_configured(frame.harness):
+        #
+        # Off the loop: the check runs ``<cli> --version``, up to 10s on a hung
+        # CLI, which inline would stall the keepalive pong and every other frame.
+        if frame.harness is not None and not await asyncio.to_thread(
+            harness_is_configured, frame.harness
+        ):
             return HostLaunchRunnerResultFrame(
                 request_id=frame.request_id,
                 status="failed",
