@@ -174,6 +174,29 @@ describe("index.css app-shell viewport lock", () => {
   });
 });
 
+const allWidthNativeLayoutRules = [
+  ["iOS keyboard viewport", "[data-ios-native].app-shell", "--omnigent-viewport-height"],
+  ["native chat header", ".chat-header", "--omnigent-safe-top"],
+  ["native Plan tracker", ".chat-plan-accordion", "--omnigent-safe-top"],
+] as const;
+
+describe("index.css native tablet layout", () => {
+  it.each(allWidthNativeLayoutRules)(
+    "keeps the %s rule outside width media queries",
+    (_, selector, value) => {
+      const matches = cssBlocks.filter(
+        ([block]) => block.includes(selector) && block.includes(value),
+      );
+      expect(matches, `missing the all-width ${selector} rule`).toHaveLength(1);
+
+      const before = cssSource.slice(0, matches[0].index!);
+      const opens = (before.match(/\{/g) ?? []).length;
+      const closes = (before.match(/\}/g) ?? []).length;
+      expect(opens - closes, `${selector} must not sit inside an at-rule`).toBe(0);
+    },
+  );
+});
+
 /* The unified native-panel rule: one ungated :is() list covering the
  * Workspace rail, the conversations sidebar, and every push panel / rail-tab
  * drawer. The assertions below apply it verbatim — media-stripping a gated
