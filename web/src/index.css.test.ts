@@ -719,7 +719,7 @@ describe("index.css desktop typography ramp", () => {
 describe("index.css body text tokens", () => {
   const desktopMap = cssSource.match(/@media \(width >= 48rem\) \{\s*:root \{[^}]*\}/)?.[0];
   const mobileMap = cssSource.match(
-    /@media \(width < 48rem\) \{\s*\/\*[^*]*\*\/\s*:root \{[^}]*\}/,
+    /@media \(width < 48rem\) \{\s*(?:\/\*[\s\S]*?\*\/\s*)?:root \{[^}]*\}/,
   )?.[0];
   const CAPTION_RATIO = 0.9;
   const LINE_HEIGHT_RATIO = 1.6;
@@ -735,6 +735,41 @@ describe("index.css body text tokens", () => {
     expect(mobileMap, "the mobile typography mapping is gone from index.css").toBeDefined();
     expect(mobileMap).toContain(`--text-sm: calc(var(--mobile-ui-font-size) * ${CAPTION_RATIO})`);
     expect(mobileMap).toContain("--text-ui: var(--mobile-ui-font-size)");
+  });
+
+  /* Contract: the Appearance font-size setting applies on mobile.
+   *
+   * The mobile base used to be a hard-coded 14px with zero references to
+   * --desktop-ui-font-size, so the Settings stepper's value was persisted and
+   * set on <html> but never consumed below 48rem — saved but not applied. The
+   * mobile base must scale off the preference. */
+  describe("mobile branch consumes the font-size preference", () => {
+    const MOBILE_BASE_RATIO = 14 / 13;
+
+    it("derives the mobile base from the preference, not a hard-coded px", () => {
+      expect(mobileMap, "the mobile typography mapping is gone from index.css").toBeDefined();
+      // A literal `--mobile-ui-font-size: 14px` is the saved-but-not-applied
+      // bug: the preference would be a dead store below 48rem.
+      expect(mobileMap).not.toMatch(/--mobile-ui-font-size:\s*\d/);
+      expect(mobileMap).toContain(
+        "--mobile-ui-font-size: calc(var(--desktop-ui-font-size) * (14 / 13))",
+      );
+    });
+
+    it("keeps the historical 14px mobile base at the default preference", () => {
+      // The ratio must map the shipped default onto the long-standing mobile
+      // base exactly, so users who never touch the setting see no change.
+      expect(UI_FONT_SIZE_DEFAULT * MOBILE_BASE_RATIO).toBe(14);
+    });
+
+    it.each([UI_FONT_SIZE_MIN, UI_FONT_SIZE_MAX])(
+      "moves the rendered mobile base when the preference is %ipx",
+      (px) => {
+        // The applied size must actually change with the setting — the
+        // user-visible half of the fix.
+        expect(px * MOBILE_BASE_RATIO).not.toBe(UI_FONT_SIZE_DEFAULT * MOBILE_BASE_RATIO);
+      },
+    );
   });
 
   it.each([UI_FONT_SIZE_MIN, UI_FONT_SIZE_DEFAULT, UI_FONT_SIZE_MAX])(
