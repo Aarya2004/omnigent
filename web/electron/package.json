@@ -87,7 +87,8 @@
       "entitlementsInherit": "signing/entitlements.mac.inherit.plist",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Omnigent uses the microphone for voice dictation in the message composer.",
-        "CFBundleIconName": "AppIcon"
+        "CFBundleIconName": "AppIcon",
+        "NSPrefersDisplaySafeAreaCompatibilityMode": false
       },
       "gatekeeperAssess": false,
       "notarize": false,
