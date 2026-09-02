@@ -1,8 +1,8 @@
 // Omnigent desktop shell — Electron edition.
 //
 // A deliberately thin Electron wrapper around the existing web UI. It bundles
-// ONLY a tiny "connect to server" setup page; the real application UI is the
-// SPA served by the Omnigent server itself. At startup we read a persisted
+// small shell-owned surfaces (setup, About, update notices); the real
+// application UI is the SPA served by the Omnigent server itself. At startup we read a persisted
 // server URL and, if present, load it directly so the user lands in the same
 // UI they'd see in a browser — now with OS-native notifications and a
 // dock/taskbar badge (wired up on the web side via `src/lib/nativeBridge.ts`,
@@ -32,6 +32,7 @@ const {
 const { autoUpdater } = require("electron-updater");
 const { createDesktopUpdater } = require("./desktop_updater");
 const { createUpdateOverlay } = require("./update_overlay");
+const { createAboutWindow, resolveAppIconDataUrl } = require("./about_window");
 const fs = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -68,6 +69,7 @@ const { decideWindowOpen, stripCrossOriginOpenerHeaders, WEB_SCHEMES } = require
 const {
   SETTINGS_PATH,
   focusedConnectedWindow,
+  aboutMenuItem,
   macApplicationMenu,
   settingsMenuItem,
 } = require("./settingsNavigation");
@@ -76,6 +78,9 @@ const serverManager = require("./server_manager");
 
 /** Absolute path to the bundled setup page (the "connect to server" form). */
 const SETUP_PAGE = path.join(__dirname, "..", "setup", "index.html");
+
+/** Shell-owned About page opened from the application menu. */
+const ABOUT_PAGE = path.join(__dirname, "..", "about", "index.html");
 
 /** The setup page's file:// URL, for verifying IPC sender frames. */
 const SETUP_PAGE_URL = pathToFileURL(SETUP_PAGE);
@@ -866,6 +871,27 @@ const updater = createDesktopUpdater({
   forceDevUpdateConfig: !app.isPackaged,
 });
 
+// Shell-owned About window: available from the native application menu even
+// while the parent is on setup or an external sign-in page.
+const aboutWindow = createAboutWindow({
+  BrowserWindow,
+  ipcMain,
+  nativeTheme,
+  updater,
+  getDesktopVersion: () => currentDesktopVersion,
+  getAppIconDataUrl: () =>
+    resolveAppIconDataUrl({
+      app,
+      nativeImage,
+      fallbackIconPath: ICON_PNG,
+    }),
+  getCliStatus: () => omnigentCli.getCliStatus(loadSettings().omnigent_path),
+  onDesktopDownloadStarted: (parent) => updateOverlay.suppress(parent),
+  onClosed: (parent) => updateOverlay.unsuppress(parent),
+  aboutPage: ABOUT_PAGE,
+  preloadPath: path.join(__dirname, "about_preload.js"),
+});
+
 // Shell-owned update toast: renders the reused web UpdateBanner in a transparent
 // corner window so it shows even against servers running old omnigent web.
 const updateOverlay = createUpdateOverlay({
@@ -873,6 +899,7 @@ const updateOverlay = createUpdateOverlay({
   ipcMain,
   nativeTheme,
   updater,
+  openAbout: (parent) => aboutWindow.open(parent),
   overlayPage: UPDATE_OVERLAY_PAGE,
   preloadPath: path.join(__dirname, "update_overlay_preload.js"),
 });
@@ -2033,6 +2060,9 @@ function changeServer() {
 
 function buildMenu() {
   const isMac = process.platform === "darwin";
+  const aboutItem = aboutMenuItem("Omnigent", () => {
+    aboutWindow.open(activeWindow());
+  });
   const settingsItem = settingsMenuItem(() => {
     const target = focusedConnectedWindow(BrowserWindow.getFocusedWindow(), windows);
     sendOpenPath(target, SETTINGS_PATH);
@@ -2044,7 +2074,7 @@ function buildMenu() {
   // Settings belongs in the macOS app menu. Keep the standard app roles that
   // Electron's composite appMenu role would otherwise provide.
   if (isMac) {
-    template.push(macApplicationMenu(app.name, settingsItem));
+    template.push(macApplicationMenu(app.name, aboutItem, settingsItem));
   }
 
   /** @type {Electron.MenuItemConstructorOptions[]} */
@@ -2076,40 +2106,14 @@ function buildMenu() {
       click: () => changeServer(),
     },
     { type: "separator" },
-    // Manual update check, surfaced as a production item here so shipped
-    // .app users can trigger it from the menubar. Download/install still
-    // flows through the in-app Settings UI / UpdateBanner (and the native
-    // consent dialog when driven from a server page).
+    // Keep update checks in the shell-owned About modal so the menu, update
+    // prompt, and About item all converge on one status/progress surface.
     {
       id: "check_for_updates",
       label: "Check for Updates…",
-      click: async () => {
-        // Surface the two silent outcomes of a manual menubar check with a
-        // native dialog: "no update" (otherwise only the renderer banner
-        // hears it, which the user may not be looking at) and "check failed"
-        // (the promise rejects and was previously swallowed). An available
-        // update is left to the in-app UpdateBanner to avoid a double notify.
-        try {
-          await updater.checkForUpdates({ manual: true });
-          const status = updater.getStatus();
-          if (status.state === "none") {
-            await dialog.showMessageBox(activeWindow(), {
-              type: "info",
-              title: "Omnigent Desktop",
-              message: "You're up to date!",
-              detail: `Omnigent Desktop ${currentDesktopVersion} is the latest version.`,
-              buttons: ["OK"],
-            });
-          }
-        } catch (err) {
-          await dialog.showMessageBox(activeWindow(), {
-            type: "warning",
-            title: "Omnigent",
-            message: "Couldn't check for updates",
-            detail: String(err?.message ?? err),
-            buttons: ["OK"],
-          });
-        }
+      click: () => {
+        aboutWindow.open(activeWindow());
+        void updater.checkForUpdates({ manual: true }).catch(() => {});
       },
     },
     {
@@ -2187,6 +2191,9 @@ function buildMenu() {
     ],
   });
   template.push({ role: "windowMenu" });
+  if (!isMac) {
+    template.push({ label: "Help", submenu: [aboutItem] });
+  }
 
   // Consolidate non-production affordances behind one top-level menu. It is
   // always present in development and can be explicitly enabled in a packaged
@@ -2867,6 +2874,7 @@ function registerIpc() {
   // Updater IPC surface (get/set config, get status, check/download/install).
   // The module owns the handlers and their trusted-sender + consent gates.
   updater.registerIpc();
+  aboutWindow.registerIpc();
   updateOverlay.registerIpc();
   returnBanner.registerIpc();
 
@@ -3384,12 +3392,7 @@ if (!gotLock) {
       // open. Skip while a deep link is being handled (or queued) — it opens
       // its own window, and racing a default window here would double-open at
       // cold start (whenReady skipped its own createWindow for the pending link).
-      if (
-        BrowserWindow.getAllWindows().length === 0 &&
-        !deepLinkInFlight &&
-        pendingDeepLinks.length === 0
-      )
-        createWindow();
+      if (windows.size === 0 && !deepLinkInFlight && pendingDeepLinks.length === 0) createWindow();
     });
   });
 

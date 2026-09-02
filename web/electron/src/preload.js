@@ -17,7 +17,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 // Collapse the update states the in-page UpdateBanner renders on
-// (available / downloaded / error-security) to `idle` so the server page can
+// (available / downloading / downloaded / error-security) to `idle` so the server page can
 // never show a banner — that UI is shell-owned (the corner overlay). Kept here
 // (not main) so it applies uniformly to getStatus + every onStatus push, and
 // so error-security still reaches Settings as idle+lastError (which it shows).
@@ -25,6 +25,7 @@ function bannerSafe(status) {
   if (
     status &&
     (status.state === "available" ||
+      status.state === "downloading" ||
       status.state === "downloaded" ||
       status.state === "error-security")
   ) {
@@ -156,7 +157,8 @@ contextBridge.exposeInMainWorld("omnigentDesktop", {
   // own preload + the Server menu). This bridge stays so Settings can still
   // read/write update preferences (mode, auto-install) and trigger a check, but
   // it is BANNER-SAFE: `bannerSafe()` collapses the states the in-page
-  // UpdateBanner renders on (available / downloaded / error-security) down to
+  // UpdateBanner renders on (available / downloading / downloaded /
+  // error-security) down to
   // `idle` before the page sees them. That means NO web bundle — including
   // older shipped ones that still mount the in-page banner — can show a
   // (duplicate) banner, while Settings still gets check progress and errors

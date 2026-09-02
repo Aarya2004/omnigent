@@ -61,6 +61,7 @@
     "afterAllArtifactBuild": "build/afterAllArtifactBuild.js",
     "files": [
       "src/**/*",
+      "about/**/*",
       "setup/**/*",
       "arca-connect/**/*",
       "server-selector-v2/**/*",
